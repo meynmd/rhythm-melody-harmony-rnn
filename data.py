@@ -1,5 +1,4 @@
 from itertools import *
-from multiprocessing import Process, Queue
 import os
 import math
 import random
@@ -32,32 +31,60 @@ class Dictionary(object):
 
 
 class Corpus(object):
-    def __init__(self, composer = None, meter = 4):
+    def __init__(self, composer = None, meter = 4,
+                 save = ('train-corpus.m21', 'valid-corpus.m21', 'test-corpus.m21'),
+                 dict_save = ('dict_dur', 'dict_mel', 'dict_har')):
+
         self.duration_dictionary = Dictionary()
         self.melodic_dictionary = Dictionary()
         self.harmonic_dictionary = Dictionary()
         self.meter = meter
 
-        if composer != None:
+        if composer is not None:
+            print('Loading corpus for composer: {}'.format(composer))
             train, valid, test = self.read_corpus(composer)
+
+            self.duration_train, self.melodic_train, self.harmonic_train = self.encode(train)
+            self.duration_valid, self.melodic_valid, self.harmonic_valid = self.encode(valid)
+            self.duration_test, self.melodic_test, self.harmonic_test = self.encode(test)
+
+            with open(save[0], 'wb') as trainfile:
+                pickle.dump((self.duration_train, self.melodic_train, self.harmonic_train), trainfile)
+            with open(save[1], 'wb') as validfile:
+                pickle.dump((self.duration_valid, self.melodic_valid, self.harmonic_valid), validfile)
+            with open(save[2], 'wb') as testfile:
+                pickle.dump((self.duration_test, self.melodic_test, self.harmonic_test), testfile)
+            with open(dict_save[0], 'wb') as dictfile:
+                pickle.dump(self.duration_dictionary, dictfile)
+            with open(dict_save[1], 'wb') as dictfile:
+                pickle.dump(self.melodic_dictionary, dictfile)
+            with open(dict_save[2], 'wb') as dictfile:
+                pickle.dump(self.harmonic_dictionary, dictfile)
+
+            print('(Duration, Melodic, Harmonic) sizes')
+            print(len(self.duration_train), len(self.melodic_train), len(self.harmonic_train))
+            print(len(self.duration_valid), len(self.melodic_valid), len(self.harmonic_valid))
+            print(len(self.duration_test), len(self.melodic_test), len(self.harmonic_test))
+
         else:
-            train, valid, test = self.unpickle_corpus()
-
-        self.duration_train, self.melodic_train, self.harmonic_train = self.encode(train)
-        self.duration_valid, self.melodic_valid, self.harmonic_valid = self.encode(valid)
-        self.duration_test, self.melodic_test, self.harmonic_test = self.encode(test)
-        print(len(self.harmonic_dictionary), len(self.harmonic_train))
-
+            self.duration_train, self.melodic_train, self.harmonic_train = self.unpickle_corpus(save[0])
+            self.duration_valid, self.melodic_valid, self.harmonic_valid = self.unpickle_corpus(save[1])
+            self.duration_test, self.melodic_test, self.harmonic_test = self.unpickle_corpus(save[2])
+            with open(dict_save[0], 'r') as fp:
+                self.duration_dictionary = pickle.load(fp)
+            with open(dict_save[1], 'r') as fp:
+                self.melodic_dictionary = pickle.load(fp)
+            with open(dict_save[2], 'r') as fp:
+                self.harmonic_dictionary = pickle.load(fp)
 
     def read_corpus(self,
             composer,
-            max_size = 300,
+            max_size = 10000,
             save = ('train-corpus.m21', 'valid-corpus.m21', 'test-corpus.m21')
     ):
         print('Reading corpus from file...')
         self.corpus = music21.corpus.getComposer(composer)
-        # if len(self.corpus) > max_size:
-        #     self.corpus = self.corpus[:max_size]
+
         if len(self.corpus) < 1:
             print('Error: cannot load any works by composer {}'.format(composer))
             exit(1)
@@ -66,12 +93,7 @@ class Corpus(object):
         train = self.parse_corpus(train, max_size)
         valid = self.parse_corpus(valid, max_size)
         test = self.parse_corpus(test, max_size)
-        # with open(save[0], 'wb') as trainfile:
-        #     pickle.dump(train, trainfile)
-        # with open(save[1], 'wb') as validfile:
-        #     pickle.dump(valid, validfile)
-        # with open(save[2], 'wb') as testfile:
-        #     pickle.dump(test, testfile)
+
         return train, valid, test
 
 
@@ -82,22 +104,18 @@ class Corpus(object):
             s = music21.corpus.parse(f)
             if s.parts[0].measure(1).barDuration.quarterLength == self.meter:
                 corpus.append(s)
+                print(s.metadata.title)
         if len(corpus) <= max_size:
             return corpus
         else:
             return corpus[: max_size]
 
 
-    def unpickle_corpus(self,
-            load = ('train-corpus.m21', 'valid-corpus.m21', 'test-corpus.m21')
-    ):
-        with open(load[0], 'r') as trainfile:
-            train = pickle.load(trainfile)
-        with open(load[0], 'r') as validfile:
-            valid = pickle.load(validfile)
-        with open(load[0], 'r') as testfile:
-            test = pickle.load(testfile)
-        return train, valid, test
+    def unpickle_corpus(self, load):
+        with open(load, 'r') as corpus_file:
+            duration, melodic, harmonic = pickle.load(corpus_file)
+        return duration, melodic, harmonic
+
 
 
     def old_allocate_corpus(self):
@@ -126,7 +144,6 @@ class Corpus(object):
 
 
     def encode(self, corpus, rhythmic_unit = 1):
-        print('Encoding rhythmic data into tensors...')
         dur_enc, mel_enc = [], []
         for score in corpus:
             for part in score.parts:
@@ -149,29 +166,55 @@ class Corpus(object):
 
     def enc_pitch_melodic(self, measure):
         notes = measure.getElementsByClass(["Note", "Rest", "Chord"])
+        keysig = measure.keySignature
+        if keysig is not None:
+            trans_interval = (12 - keysig.asKey().getTonic().pitchClass) % 12
+        else:
+            trans_interval = 0
         measure_enc = []
         for n in notes:
-            encoding = self.enc_note_pitch(n)
-            measure_enc.append(self.melodic_dictionary.add_word(encoding))
+            if type(n) == music21.note.Note or type(n) == music21.chord.Chord:
+                pitch = self.enc_note_pitch(n.transpose(trans_interval))
+            else:
+                pitch = ()
+            measure_enc.append(self.melodic_dictionary.add_word(pitch))
         return measure_enc
+
+    # def enc_pitch_melodic(self, measure):
+    #     notes = measure.getElementsByClass(["Note", "Rest", "Chord"])
+    #     measure_enc = []
+    #     for n in notes:
+    #         encoding = self.enc_note_pitch(n)
+    #         measure_enc.append(self.melodic_dictionary.add_word(encoding))
+    #     return measure_enc
 
 
     # need all parts at once, so this is a bit messier
     def enc_pitch_harmonic(self, corpus):
-        # chord_enc = []
-        # for score in corpus:
-        #     measures = score.chordify()
-        #     for chord in measures.recurse().getElementsByClass('Chord'):
-        #         chord_enc += [p.nameWithOctave for p in chord.pitches] + ['<EOC>']
-        # return [self.harmonic_dictionary.add_word(ch) for ch in chord_enc]
         h_pitches = []
         for score in corpus:
             measures = score.chordify()
+            # assume for simplicity that the key signature does not change
+            m1 = measures[1]
+            if m1.keySignature is not None:
+                transpose_interval = 12 - m1.keySignature.asKey().getTonic().pitchClass
+            else:
+                transpose_interval = 0
             for chord in measures.recurse().getElementsByClass('Chord'):
-                pitches = set([p.pitchClass for p in chord.pitches])
+                pitches = set(
+                    [(p.pitchClass + transpose_interval) % 12 for p in chord.pitches])
                 for perm in permutations(pitches):
                     h_pitches += [p for p in perm] + ['<EOC>']
         return [self.harmonic_dictionary.add_word(c) for c in h_pitches]
+
+        # h_pitches = []
+        # for score in corpus:
+        #     measures = score.chordify()
+        #     for chord in measures.recurse().getElementsByClass('Chord'):
+        #         pitches = set([p.pitchClass for p in chord.pitches])
+        #         for perm in permutations(pitches):
+        #             h_pitches += [p for p in perm] + ['<EOC>']
+        # return [self.harmonic_dictionary.add_word(c) for c in h_pitches]
 
 
     def enc_note_pitch(self, n):
@@ -187,5 +230,5 @@ class Corpus(object):
 
 
 
-c = Corpus('bach')
+
 

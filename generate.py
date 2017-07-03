@@ -81,7 +81,7 @@ else:
     har_model.cpu()
 
 # TODO: make corpus constructor take desired meter
-corpus = data.Corpus('beethoven')
+corpus = data.Corpus()
 ntokens = len(corpus.duration_dictionary)
 hidden = dur_model.init_hidden(1)
 input = Variable(torch.rand(1, 1).mul(ntokens).long(), volatile=True)
@@ -105,7 +105,7 @@ for i in range(nmeasures):
             word = tuple([d for d in word] + [beats_measure - sum(word)])
         measure.append(word)
     measures_dur.append(measure)
-    print (measure)
+    # print (measure)
 
     if i % args.log_interval == 0:
         print('| Duration Output: Generated {}/{} measures'.format(i, args.measures))
@@ -125,6 +125,8 @@ for i in range(npitches):
     word_idx = torch.multinomial(word_weights, 1)[0]
     input.data.fill_(word_idx)
     word = corpus.melodic_dictionary.idx2word[word_idx]
+    if len(word) == 0:
+        print(word)
     melodic_pitches.append(word)
 
 # start constructing the output score
@@ -162,10 +164,6 @@ def find_overlapping(measures, this_note):
     this_note_offset = this_note.offset
     overlapping = []
     for m in measures:
-        # preceding = takewhile(
-        #     lambda x: x.offset <= this_note.offset,
-        #     [n for n in m.getElementsByClass(["Note", "Rest", "Chord"])]
-        # )
         over_note = None
         for n in m.getElementsByClass(["Note", "Rest", "Chord"]):
             if n.offset <= this_note.offset:
@@ -184,26 +182,26 @@ def generate_chord(existing_pitches, num_to_gen):
     out_chords = []
     hidden = har_model.init_hidden(1)
     for pitch in existing_pitches:
-        p_idx = corpus.harmonic_dictionary.word2idx[pitch]
-        # input = Variable(torch.LongTensor([p_idx]), volatile=True)
-        # input = Variable(torch.rand(1, 1).mul(ntokens).long(), volatile=True)
-        start_note = torch.LongTensor(1, 1)
-        start_note[0] = p_idx
-        input = Variable(start_note, volatile=True)
-        print (input)
-        if args.cuda:
-            input.data = input.data.cuda()
+        for j in range(5):
+            p_idx = corpus.harmonic_dictionary.word2idx[pitch]
+            # input = Variable(torch.LongTensor([p_idx]), volatile=True)
+            # input = Variable(torch.rand(1, 1).mul(ntokens).long(), volatile=True)
+            start_note = torch.LongTensor(1, 1)
+            start_note[0] = p_idx
+            input = Variable(start_note, volatile=True)
+            if args.cuda:
+                input.data = input.data.cuda()
 
-        chord_pitches = []
-        for i in range(num_to_gen):
-            output, hidden = har_model(input, hidden)
-            word_weights = output.squeeze().data.div(args.temperature).exp().cpu()
-            word_idx = torch.multinomial(word_weights, 1)[0]
-            input.data.fill_(word_idx)
-            word = corpus.harmonic_dictionary.idx2word[word_idx]
-            if word == '<EOC>':
-                break
-            out_chords += [word_idx]
+            chord_pitches = []
+            for i in range(num_to_gen):
+                output, hidden = har_model(input, hidden)
+                word_weights = output.squeeze().data.div(args.temperature).exp().cpu()
+                word_idx = torch.multinomial(word_weights, 1)[0]
+                input.data.fill_(word_idx)
+                word = corpus.harmonic_dictionary.idx2word[word_idx]
+                if word == '<EOC>':
+                    break
+                out_chords += [word_idx]
 
         # if len(chord_pitches) > 0:
         #     out_chords.append(chord_pitches)
@@ -220,7 +218,7 @@ for j in range(nmeasures):
             over_pitches = find_overlapping([score[m][j] for m in range(i)], note)
             # run the model to find candidate pitches
             candidate_chords = generate_chord(over_pitches, 4)
-            print('note: {}\n\tcandidates: {}'.format(note, candidate_chords))
+            print('notes: {}\n\tcandidates: {}'.format(over_pitches, candidate_chords))
             if len(candidate_chords) > 0:
                 chosen_pitch = stats.mode(numpy.array(candidate_chords))[0][0]
                 note.pitch.pitchClass = corpus.harmonic_dictionary.idx2word[chosen_pitch]

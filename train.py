@@ -47,6 +47,8 @@ parser.add_argument('--melsave', type=str,  default='mel-model.pt',
                     help='path to save the final melodic pitch model')
 parser.add_argument('--harsave', type=str,  default='har-model.pt',
                     help='path to save the final harmonic pitch model')
+parser.add_argument('--corpus', type=str,  default=None,
+                    help='composer to train on')
 args = parser.parse_args()
 
 eval_batch_size = 10
@@ -179,7 +181,7 @@ if torch.cuda.is_available():
         torch.cuda.manual_seed(args.seed)
 
 # load the data
-corpus = data.Corpus('bach')
+corpus = data.Corpus(args.corpus)
 
 ###############################################################################
 # Rhythm model
