@@ -133,10 +133,10 @@ def train(data_train, data_dict, model_train, epoch):
             start_time = time.time()
 
 
-def run_training(train_data, val_data, test_data, model_train, data_dict, lr, save):
+def run_training(train_data, val_data, test_data, model_train, data_dict, lr, save, epochs):
     best_val_loss = None
     try:
-        for epoch in range(1, args.epochs + 1):
+        for epoch in range(1, epochs + 1):
             epoch_start_time = time.time()
             train(train_data, data_dict, model_train, epoch)
             val_loss = evaluate(val_data, data_dict, model_train)
@@ -201,7 +201,7 @@ if args.cuda:
 # Train
 run_training(dur_train_data, dur_val_data, dur_test_data,
              rhythm_model, corpus.duration_dictionary, lr,
-             args.dursave)
+             args.dursave, 40)
 
 # Load the best saved model.
 with open(args.dursave, 'rb') as f:
@@ -228,7 +228,7 @@ if args.cuda:
 # Train
 run_training(mel_train_data, mel_val_data, mel_test_data,
              melodic_model, corpus.melodic_dictionary, lr,
-             args.melsave)
+             args.melsave, args.epochs)
 
 # Load the best saved model.
 with open(args.melsave, 'rb') as f:
@@ -255,7 +255,7 @@ if args.cuda:
 # Train
 run_training(har_train_data, har_val_data, har_test_data,
              harmonic_model, corpus.harmonic_dictionary, lr,
-             args.harsave)
+             args.harsave, args.epochs)
 
 # Load the best saved model.
 with open(args.harsave, 'rb') as f:

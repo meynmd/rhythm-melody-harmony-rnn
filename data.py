@@ -38,6 +38,7 @@ class Corpus(object):
         self.duration_dictionary = Dictionary()
         self.melodic_dictionary = Dictionary()
         self.harmonic_dictionary = Dictionary()
+        self.chords_dictionary = Dictionary()
         self.meter = meter
 
         if composer is not None:
@@ -99,7 +100,6 @@ class Corpus(object):
 
     def parse_corpus(self, files, max_size):
         corpus = []
-
         for f in files:
             s = music21.corpus.parse(f)
             if s.parts[0].measure(1).barDuration.quarterLength == self.meter:
@@ -180,17 +180,9 @@ class Corpus(object):
             measure_enc.append(self.melodic_dictionary.add_word(pitch))
         return measure_enc
 
-    # def enc_pitch_melodic(self, measure):
-    #     notes = measure.getElementsByClass(["Note", "Rest", "Chord"])
-    #     measure_enc = []
-    #     for n in notes:
-    #         encoding = self.enc_note_pitch(n)
-    #         measure_enc.append(self.melodic_dictionary.add_word(encoding))
-    #     return measure_enc
 
-
-    # need all parts at once, so this is a bit messier
-    def enc_pitch_harmonic(self, corpus):
+    # the model for completing a chord given some existing pitches
+    def enc_pitch_chord_formation(self, corpus):
         h_pitches = []
         for score in corpus:
             measures = score.chordify()
@@ -205,16 +197,30 @@ class Corpus(object):
                     [(p.pitchClass + transpose_interval) % 12 for p in chord.pitches])
                 for perm in permutations(pitches):
                     h_pitches += [p for p in perm] + ['<EOC>']
-        return [self.harmonic_dictionary.add_word(c) for c in h_pitches]
+        return [self.chords_dictionary.add_word(c) for c in h_pitches]
 
-        # h_pitches = []
-        # for score in corpus:
-        #     measures = score.chordify()
-        #     for chord in measures.recurse().getElementsByClass('Chord'):
-        #         pitches = set([p.pitchClass for p in chord.pitches])
-        #         for perm in permutations(pitches):
-        #             h_pitches += [p for p in perm] + ['<EOC>']
-        # return [self.harmonic_dictionary.add_word(c) for c in h_pitches]
+
+    def enc_pitch_harmonic(self, corpus):
+        chord_seq = []
+        for score in corpus:
+            measures = score.chordify()
+
+            # assume for simplicity that the key signature does not change
+            m1 = measures[1]
+            if m1.keySignature is not None:
+                transpose_interval = 12 - m1.keySignature.asKey().getTonic().pitchClass
+            else:
+                transpose_interval = 0
+
+            for chord in measures.recurse().getElementsByClass('Chord'):
+                chord_pitches = tuple(sorted(list(set(
+                    [(p.pitchClass + transpose_interval) % 12 for p in chord.pitches]
+                ))))
+                chord_seq.append(chord_pitches)
+
+            chord_seq.append(())
+
+        return [self.harmonic_dictionary.add_word(c) for c in chord_seq]
 
 
     def enc_note_pitch(self, n):
