@@ -279,10 +279,16 @@ for i, (offset, notes) in enumerate(sorted(overlapping.items())):
         hidden = new_hidden
     unused = list(chord)
 
-    for j in range(1, len(notes)):
+    for j in range(len(notes)):
         if type(notes[j]) == music21.note.Rest:
             continue
+
         elif type(notes[j]) == music21.note.Note:
+            if notes[j].priority == 1:
+                print('top line')
+                notes[j].octave += 1
+                continue
+
             if len(unused) > 0:
                 notes[j].pitch.pitchClass = unused.pop(random.randint(0, len(unused) - 1))
             else:
@@ -294,9 +300,10 @@ for i, (offset, notes) in enumerate(sorted(overlapping.items())):
             if prev_pitches[j] == None:
                 prev_pitches[j] = notes[j].pitch.pitchClass
             if notes[j].pitch.pitchClass - prev_pitches[j] > 9:
-                octaves[j] = max(octaves[j] - 1, 1)
-            elif notes[j].pitch.pitchClass - prev_pitches[j] < -9:
                 octaves[j] = min(octaves[j] + 1, 4)
+            elif notes[j].pitch.pitchClass - prev_pitches[j] < -9:
+                octaves[j] = max(octaves[j] - 1, 1)
+
             notes[j].octave = octaves[j]
             prev_pitches[j] = notes[j].pitch.pitchClass
 

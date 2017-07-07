@@ -226,10 +226,11 @@ class Corpus(object):
     def enc_note_pitch(self, n):
         note_type = type(n)
         if note_type == music21.chord.Chord:
-            return tuple([p.nameWithOctave for p in n.pitches])
-            # return tuple(n.pitchClasses)
+            # return tuple([p.nameWithOctave for p in n.pitches])
+            return tuple(n.pitchClasses)
         elif note_type == music21.note.Note:
-            return (n.pitch.nameWithOctave,)
+            # return (n.pitch.nameWithOctave,)
+            return n.pitch.pitchClass
         else:
             return ()
 
