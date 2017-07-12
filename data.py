@@ -31,7 +31,7 @@ class Dictionary(object):
 
 
 class Corpus(object):
-    def __init__(self, composer = None, meter = 4,
+    def __init__(self, corpus_dir = None, composer = None, meter = 4,
                  save = ('train-corpus.m21', 'valid-corpus.m21', 'test-corpus.m21'),
                  dict_save = ('dict_dur', 'dict_mel', 'dict_har')):
 
@@ -41,9 +41,13 @@ class Corpus(object):
         self.chords_dictionary = Dictionary()
         self.meter = meter
 
-        if composer is not None:
-            print('Loading corpus for composer: {}'.format(composer))
-            train, valid, test = self.read_corpus(composer)
+        if composer is not None or corpus_dir is not None:
+            if corpus_dir is not None:
+                print('Loading corpus from directory: {}'.format(corpus_dir))
+
+            else:
+                print('Loading corpus for composer: {}'.format(composer))
+                train, valid, test = self.read_corpus(composer)
 
             self.duration_train, self.melodic_train, self.harmonic_train = self.encode(train)
             self.duration_valid, self.melodic_valid, self.harmonic_valid = self.encode(valid)
@@ -81,8 +85,8 @@ class Corpus(object):
     def read_corpus(self,
             composer,
             max_size = 10000,
-            save = ('train-corpus.m21', 'valid-corpus.m21', 'test-corpus.m21')
-    ):
+            save = ('train-corpus.m21', 'valid-corpus.m21', 'test-corpus.m21')):
+
         print('Reading corpus from file...')
         self.corpus = music21.corpus.getComposer(composer)
 
@@ -137,6 +141,7 @@ class Corpus(object):
         corpus = self.corpus
         num_valid = int(math.floor(len(corpus) * ValidFraction))
         num_test = int(math.floor(len(corpus) * TestFraction))
+        print(num_valid, num_test)
         test = corpus[: num_test]
         valid = corpus[num_test : num_test + num_valid]
         train = corpus[num_test + num_valid :]
@@ -181,25 +186,6 @@ class Corpus(object):
         return measure_enc
 
 
-    # the model for completing a chord given some existing pitches
-    def enc_pitch_chord_formation(self, corpus):
-        h_pitches = []
-        for score in corpus:
-            measures = score.chordify()
-            # assume for simplicity that the key signature does not change
-            m1 = measures[1]
-            if m1.keySignature is not None:
-                transpose_interval = 12 - m1.keySignature.asKey().getTonic().pitchClass
-            else:
-                transpose_interval = 0
-            for chord in measures.recurse().getElementsByClass('Chord'):
-                pitches = set(
-                    [(p.pitchClass + transpose_interval) % 12 for p in chord.pitches])
-                for perm in permutations(pitches):
-                    h_pitches += [p for p in perm] + ['<EOC>']
-        return [self.chords_dictionary.add_word(c) for c in h_pitches]
-
-
     def enc_pitch_harmonic(self, corpus):
         chord_seq = []
         for score in corpus:
@@ -230,7 +216,7 @@ class Corpus(object):
             return tuple(n.pitchClasses)
         elif note_type == music21.note.Note:
             # return (n.pitch.nameWithOctave,)
-            return n.pitch.pitchClass
+            return (n.pitch.pitchClass,)
         else:
             return ()
 

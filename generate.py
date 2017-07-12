@@ -163,23 +163,6 @@ if nparts < 2:
     exit(0)
 
 
-def find_overlapping(measures, this_note):
-    this_note_offset = this_note.offset
-    overlapping = []
-    for m in measures:
-        over_note = None
-        for n in m.getElementsByClass(["Note", "Rest", "Chord"]):
-            if n.offset <= this_note.offset:
-                over_note = n
-            else:
-                break
-        if type(over_note) == music21.note.Note:
-            overlapping.append(over_note.pitch.pitchClass)
-        elif type(over_note) == music21.chord.Chord:
-            overlapping += [p.pitchClass for p in over_note.pitches]
-    return overlapping
-
-
 def generate_chord(existing_pitches, num_to_gen):
     ntokens = len(corpus.harmonic_dictionary)
     out_pitches = []
@@ -227,29 +210,6 @@ def get_chord_weights(hidden_state, prev_pitch_classes):
     output, hidden_state = har_model(input, hidden_state)
     weights = output.squeeze().data.div(args.temperature).exp().cpu()
     return weights, hidden_state
-
-
-
-def random_chord(start_note):
-    pc = start_note.pitch.pitchClass
-    chord_tones = [pc]
-    r = random.randint(0, 2)
-    if r == 0:
-        chord_tones.append(pc + 7)
-        if random.randint(0, 1) == 0:
-            chord_tones.append(pc + 3)
-        else:
-            chord_tones.append(pc + 4)
-    elif r == 1:
-        chord_tones.append(pc + 5)
-        if random.randint(0, 1) == 0:
-            chord_tones.append(pc + 8)
-        else:
-            chord_tones.append(pc + 9)
-    else:
-        chord_tones.append(pc + 3)
-        chord_tones.append(pc + 8)
-    return chord_tones
 
 
 # generate the chords to use
@@ -313,36 +273,6 @@ for i, (offset, notes) in enumerate(sorted(overlapping.items())):
                     n.pitch.pitchClass = random.choice(chord)
 
     last_chord = chord
-
-
-
-
-# fill in the other parts
-# current_octave = [random.randint(1, 3) for i in range(nparts)]
-# last_notes = [None for i in range(nparts)]
-# for j in range(nmeasures):
-#     for i in range(1, nparts):
-#         for k, note in enumerate(score[i][j]):
-#             over_pitches = find_overlapping([score[m][j] for m in range(i)], note)
-#             # run the model to find candidate pitches
-#             candidate_chords = generate_chord(over_pitches, 4)
-#             print('notes: {}\n\tcandidates: {}'.format(over_pitches, candidate_chords))
-#             if len(candidate_chords) > 0:
-#                 chosen_pitch = stats.mode(numpy.array(candidate_chords))[0][0]
-#                 note.pitch.pitchClass = corpus.harmonic_dictionary.idx2word[chosen_pitch]
-#                 if last_notes[i] != None:
-#                     if note.pitch.pitchClass - last_notes[i] > 9:
-#                         current_octave[i] = max(current_octave[i] - 1, 1)
-#                     elif note.pitch.pitchClass - last_notes[i] < 9:
-#                         current_octave[i] = min(current_octave[i] + 1, 5)
-#                 note.pitch.octave = current_octave[i]
-#                 last_notes[i] = note.pitch.pitchClass
-#             else:
-#                 r = music21.note.Rest()
-#                 r.duration.quarterLength = note.duration.quarterLength
-#                 score[i][j].replace(note, r)
-
-
 
 score.show()
 
