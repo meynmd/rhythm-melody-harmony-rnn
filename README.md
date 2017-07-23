@@ -5,7 +5,7 @@ The neural netword code is based on the PyTorch word language model (Penn Treeba
 https://github.com/pytorch/examples.git
 
 Required dependencies:
-  PyTorch (torch)
+  PyTorch (torch),
   Music21 (https://github.com/cuthbertLab/music21/releases)
   
 You should also have a music editor installed so you can view the result when it is generated.
