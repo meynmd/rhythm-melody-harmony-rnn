@@ -1,9 +1,11 @@
 ###############################################################################
-# Music Language Modeling
+# duration-melodic-harmonic music language model
+# based on generate.py from
+# PyTorch word language model (Penn Treebank) example code
+# https://github.com/pytorch/examples.git
 #
-# based on Language Modeling on Penn Tree Bank
-#
-# This file generates new sentences sampled from the language model
+# This script generates music sampled from the duration, melodic and harmonic
+# language models
 #
 ###############################################################################
 
@@ -59,14 +61,13 @@ if torch.cuda.is_available():
 if args.temperature < 1e-3:
     parser.error("--temperature has to be greater or equal 1e-3")
 
+# load the models
 with open(args.duration, 'rb') as f:
     dur_model = torch.load(f)
 dur_model.eval()
-
 with open(args.melodic, 'rb') as f:
     mel_model = torch.load(f)
 mel_model.eval()
-
 with open(args.harmonic, 'rb') as f:
     har_model = torch.load(f)
 har_model.eval()
@@ -80,6 +81,7 @@ else:
     mel_model.cpu()
     har_model.cpu()
 
+# load the last saved corpus and model
 # TODO: make corpus constructor take desired meter
 corpus = data.Corpus()
 ntokens = len(corpus.duration_dictionary)
@@ -101,98 +103,40 @@ for i in range(nmeasures):
         word_idx = torch.multinomial(word_weights, 1)[0]
         input.data.fill_(word_idx)
         word = corpus.duration_dictionary.idx2word[word_idx]
-        if sum(word) != beats_measure:
-            word = tuple([d for d in word] + [beats_measure - sum(word)])
+        if sum([abs(tok) for tok in word]) > beats_measure:
+            word = [tok for tok in word]
+            while sum([abs(t) for t in word]) > beats_measure:
+                word = word[:-1]
+            word = tuple(word)
+        if sum([abs(tok) for tok in word]) < beats_measure:
+            print('warning: too few beats in measure')
+            word = tuple([d for d in word] + [beats_measure - sum([abs(tok) for tok in word])])
+
         measure.append(word)
     measures_dur.append(measure)
-    # print (measure)
 
     if i % args.log_interval == 0:
         print('| Duration Output: Generated {}/{} measures'.format(i, args.measures))
-
-# generate one line of melody to start with
-ntokens = len(corpus.melodic_dictionary)
-hidden = mel_model.init_hidden(1)
-input = Variable(torch.rand(1, 1).mul(ntokens).long(), volatile=True)
-if args.cuda:
-    input.data = input.data.cuda()
-
-npitches = sum([sum([len(p) for p in m]) for m in measures_dur])
-melodic_pitches = []
-for i in range(npitches):
-    output, hidden = mel_model(input, hidden)
-    word_weights = output.squeeze().data.div(args.temperature).exp().cpu()
-    word_idx = torch.multinomial(word_weights, 1)[0]
-    input.data.fill_(word_idx)
-    word = corpus.melodic_dictionary.idx2word[word_idx]
-    melodic_pitches.append(word)
 
 # start constructing the output score
 score = music21.stream.Score()
 for j in range(nparts):
     score.append(music21.stream.Part())
-# out_parts = [music21.stream.Part() for j in range(nparts)]
 for j, md in enumerate(measures_dur):
     for i, part in enumerate(md):
         out_measure = music21.stream.Measure()
         out_measure.number = j
         for dur in part:
-            if i == 0:
-                next_pitch = melodic_pitches.pop(0)
-                if len(next_pitch) == 1:
-                    note = music21.note.Note(next_pitch[0])
-                elif len(next_pitch) == 0:
-                    note = music21.note.Rest()
-                else:
-                    note = music21.chord.Chord(list(next_pitch))
-                note.priority = 1
-            else:
+            # place-holder notes
+            if dur >= 0:
                 note = music21.note.Note()
-                note.priority = 0
-
-            note.duration.quarterLength = dur
+                note.duration.quarterLength = dur
+            else:
+                note = music21.note.Rest()
+                note.duration.quarterLength = -dur
+            note.priority = i   # I'll use Note.priority to indicate which part
             out_measure.append(note)
-        # out_parts[i].append(out_measure)
         score.parts.elements[i].append(out_measure)
-
-# for p in out_parts:
-#      score.append(p)
-
-if nparts < 2:
-    score.show()
-    exit(0)
-
-
-def generate_chord(existing_pitches, num_to_gen):
-    ntokens = len(corpus.harmonic_dictionary)
-    out_pitches = []
-    hidden = har_model.init_hidden(1)
-    for pitch in existing_pitches:
-        for j in range(5):
-            p_idx = corpus.harmonic_dictionary.word2idx[pitch]
-            # input = Variable(torch.LongTensor([p_idx]), volatile=True)
-            # input = Variable(torch.rand(1, 1).mul(ntokens).long(), volatile=True)
-            start_note = torch.LongTensor(1, 1)
-            start_note[0] = p_idx
-            input = Variable(start_note, volatile=True)
-            if args.cuda:
-                input.data = input.data.cuda()
-
-            chord_pitches = []
-            for i in range(num_to_gen):
-                output, hidden = har_model(input, hidden)
-                word_weights = output.squeeze().data.div(args.temperature).exp().cpu()
-                word_idx = torch.multinomial(word_weights, 1)[0]
-                input.data.fill_(word_idx)
-                word = corpus.harmonic_dictionary.idx2word[word_idx]
-                if word == '<EOC>':
-                    break
-                out_pitches += [word_idx]
-
-        # if len(chord_pitches) > 0:
-        #     out_chords.append(chord_pitches)
-
-    return out_pitches
 
 
 def get_chord_weights(hidden_state, prev_pitch_classes):
@@ -208,71 +152,177 @@ def get_chord_weights(hidden_state, prev_pitch_classes):
         input.data = input.data.cuda()
 
     output, hidden_state = har_model(input, hidden_state)
-    weights = output.squeeze().data.div(args.temperature).exp().cpu()
+    weights = output.squeeze().data.div(args.temperature).cpu()
     return weights, hidden_state
 
 
-# generate the chords to use
+def get_melodic_weights(hidden_state, prev_pitch_class, temperature=args.temperature):
+    input_tensor = torch.LongTensor(1, 1)
+    input_tensor[0] = corpus.melodic_dictionary.word2idx[(prev_pitch_class,)]
+    input = Variable(input_tensor, volatile=True)
+    if args.cuda:
+        input.data = input.data.cuda()
+
+    output, hidden_state = mel_model(input, hidden_state)
+    weights = output.squeeze().data.div(temperature)
+
+    return weights, hidden_state
+
+
+# generate the pitches
+h_hidden = har_model.init_hidden(1)
+m_hidden = [mel_model.init_hidden(1) for i in range(nparts)]
+pitchset_random = []
+while len(pitchset_random) < 3:
+    pitchset_random = corpus.harmonic_dictionary.idx2word[random.randint(
+        0, len(corpus.harmonic_dictionary.idx2word))]
+current_pitch_classes = [random.choice(pitchset_random) for i in range(nparts)]
+current_notes = [None for i in range(nparts)]
+temperature = args.temperature
 last_chord = None
-hidden = har_model.init_hidden(1)
+chosen_chord = None
 chord_weights = None
-overlapping = score.getOverlaps()
-octaves = [random.randint(2, 3) for i in range(max(len(v) for v in overlapping.values()))]
-prev_pitches = [None for i in range(max(len(v) for v in overlapping.values()))]
-for i, (offset, notes) in enumerate(sorted(overlapping.items())):
+melodic_weights = [[] for i in range(nparts)]
+overlaps = score.getOverlaps()
+
+if nparts > 4:
+    octaves = [random.randint(2, 5) for i in range(max(len(v) for v in overlaps.values()))]
+    octaves[0] = 5
+else:
+    octaves = [4,4,3,3]
+home_octaves = octaves
+
+for i, (offset, notes) in enumerate(sorted(overlaps.items())):
+    # generate a distribution for the melodic notes of each part
+    for j, note in enumerate(notes):
+        part_idx = note.priority
+        if current_pitch_classes[part_idx] is not None:
+            melodic_weights[part_idx], m_hidden[part_idx] = get_melodic_weights(
+                m_hidden[part_idx], current_pitch_classes[part_idx], temperature
+            )
+        else:
+            melodic_weights[part_idx] = torch.Tensor(
+                [-1. for i in range(len(corpus.melodic_dictionary))]
+            )
+
+        mw = torch.exp(melodic_weights[part_idx])
+        sum_weights = mw.sum()
+        melodic_weights[part_idx] = torch.div(mw, sum_weights)
+
+    # generate a distribution for the next chord
     if last_chord is None:
-        # chord_tones = random_chord(notes[0])
-        # for j in range(1, len(notes)):
-        #     notes[j].pitch.pitchClass = random.choice(chord_tones)
-
-        #chord_weights, new_hidden = get_chord_weights([n.pitch.pitchClass for n in notes])
-
         chord_idx = random.randint(0, len(corpus.harmonic_dictionary.idx2word))
-        chord = corpus.harmonic_dictionary.idx2word[chord_idx]
-        last_chord = chord
-        # last_chord = [n.pitch.pitchClass for n in notes]
+        chosen_chord = corpus.harmonic_dictionary.idx2word[chord_idx]
+        last_chord = chosen_chord
     else:
-        chord_weights, new_hidden = get_chord_weights(hidden, last_chord)
+        chord_weights, new_hidden = get_chord_weights(h_hidden, last_chord)
+        h_hidden = new_hidden
 
-        chord_idx = torch.multinomial(chord_weights, 1)[0]
-        chord = corpus.harmonic_dictionary.idx2word[chord_idx]
-        hidden = new_hidden
-    unused = list(chord)
+        chord_weights = torch.exp(chord_weights)
+        sum_weights = chord_weights.sum()
+        chord_weights = torch.div(chord_weights, sum_weights)
 
-    for j in range(len(notes)):
-        if type(notes[j]) == music21.note.Rest:
+        # choose the next chord
+        chosen_chord_idx = torch.multinomial(chord_weights, 1)[0]
+        chosen_chord = corpus.harmonic_dictionary.idx2word[chosen_chord_idx]
+        last_chord = chosen_chord
+        print(chosen_chord)
+
+    chord_tone_idxs = [corpus.melodic_dictionary.word2idx[(pc,)] for pc in chosen_chord]
+    for note in notes:
+        part_idx = note.priority
+
+        # normalize weights
+        sum_weights = melodic_weights[part_idx].sum()
+        if sum_weights == 0.:
             continue
+        melodic_weights[part_idx] = torch.div(melodic_weights[part_idx], sum_weights)
 
-        elif type(notes[j]) == music21.note.Note:
-            if notes[j].priority == 1:
-                print('top line')
-                notes[j].octave += 1
-                continue
+        # need to figure out a way to negotiate between melodic and harmonic model
+        for j, w in enumerate(melodic_weights[part_idx]):
+            # if len(corpus.melodic_dictionary.idx2word[j]) == 0:
+            #     continue
+            if j not in chord_tone_idxs:
+                melodic_weights[part_idx][j] = (melodic_weights[part_idx][j])**(1.0 + len(chord_tone_idxs))
+                # melodic_weights[part_idx][j] = 0.
 
-            if len(unused) > 0:
-                notes[j].pitch.pitchClass = unused.pop(random.randint(0, len(unused) - 1))
-            else:
-                if len(chord) > 0:
-                    notes[j].pitch.pitchClass = random.choice(chord)
+        # renormalize weights
+        sum_weights = melodic_weights[part_idx].sum()
+        if sum_weights == 0.:
+            continue
+        melodic_weights[part_idx] = torch.div(melodic_weights[part_idx], sum_weights)
+
+        if type(note) == music21.note.Note:
+            # figure out what is the best pitch to assign this note
+            part_idx = note.priority
+            chosen_pitch_idx = torch.multinomial(melodic_weights[part_idx], 1)[0]
+            chosen_pitch = corpus.melodic_dictionary.idx2word[chosen_pitch_idx]
+            if len(chosen_pitch) == 1:
+                note.pitch.pitchClass = chosen_pitch[0]
+
+                # determine the octave
+                note.octave = octaves[part_idx]
+                if current_notes[part_idx] is not None:
+                    interval = music21.interval.notesToInterval(current_notes[part_idx], note).cents / 100
                 else:
-                    notes[j].pitch.pitchClass = random.choice(last_chord)
+                    interval = 0
 
-            if prev_pitches[j] == None:
-                prev_pitches[j] = notes[j].pitch.pitchClass
-            if notes[j].pitch.pitchClass - prev_pitches[j] > 9:
-                octaves[j] = min(octaves[j] + 1, 4)
-            elif notes[j].pitch.pitchClass - prev_pitches[j] < -9:
-                octaves[j] = max(octaves[j] - 1, 1)
+                while abs(interval) > 9:
 
-            notes[j].octave = octaves[j]
-            prev_pitches[j] = notes[j].pitch.pitchClass
+                    if interval > 9:
+                        # and music21.interval.notesToInterval(
+                        #             current_notes[min(nparts - 1, part_idx + 1)], note
+                        # ).cents >= 12:
+                        if note.octave > 1:
+                            note.octave -= 1
+                            interval = music21.interval.notesToInterval(
+                                current_notes[part_idx], note).cents / 100
+                        else:
+                            break
 
-        elif type(notes[j]) == music21.chord.Chord:
-            if len(chord) > 0:
-                for n in notes[j]:
-                    n.pitch.pitchClass = random.choice(chord)
+                    elif interval < -9:
+                        # and music21.interval.notesToInterval(
+                        #             current_notes[max(0, part_idx - 1)], note
+                        # ).cents <= 12:
+                        if note.octave < 6:
+                            note.octave += 1
+                            interval = music21.interval.notesToInterval(
+                                current_notes[part_idx], note).cents / 100
+                        else:
+                            break
 
-    last_chord = chord
+                    else:
+                        break
+
+                octaves[part_idx] = note.octave
+                current_notes[part_idx] = note
+
+                if current_pitch_classes[part_idx] == note.pitch.pitchClass:
+                    temperature += 0.5
+                else:
+                    temperature = max(temperature - 0.25, args.temperature)
+
+                current_pitch_classes[part_idx] = note.pitch.pitchClass
+
+            elif len(chosen_pitch) == 0:
+                r = music21.note.Rest()
+                r.duration = note.duration
+                # note = music21.note.Rest()
+                note.getContextByClass('Measure').replace(note, r)
+                octaves[part_idx] = home_octaves[part_idx]
+            else:
+                note = music21.chord.Chord(list(chosen_pitch))
+                octaves[part_idx] = home_octaves[part_idx]
+
+        elif type(note) == music21.chord.Chord:
+            chord_pitches = [corpus.melodic_dictionary.idx2word[idx] for idx in note_idxs]
+            if len(note) > 0:
+                for n in note:
+                    n.pitch.pitchClass = random.choice(chord_pitches)
+                    n.pitch.pitchClass = octaves[part_idx]
+
+
+
 
 score.show()
 

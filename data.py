@@ -1,3 +1,9 @@
+"""
+Corpus class for duration-melodic-harmonic music language model
+based on data.py from PyTorch word language model (Penn Treebank) example code
+https://github.com/pytorch/examples.git
+"""
+
 from itertools import *
 import os
 import math
@@ -8,8 +14,8 @@ import pickle
 import torch
 import music21
 
-ValidFraction = 0.2
-TestFraction = 0.2
+ValidFraction = 0.15
+TestFraction = 0.15
 
 music21.environment.UserSettings()['warnings'] = 0
 
@@ -44,7 +50,7 @@ class Corpus(object):
         if composer is not None or corpus_dir is not None:
             if corpus_dir is not None:
                 print('Loading corpus from directory: {}'.format(corpus_dir))
-
+                train, valid, test = self.read_corpus_from_files(corpus_dir)
             else:
                 print('Loading corpus for composer: {}'.format(composer))
                 train, valid, test = self.read_corpus(composer)
@@ -81,6 +87,26 @@ class Corpus(object):
                 self.melodic_dictionary = pickle.load(fp)
             with open(dict_save[2], 'r') as fp:
                 self.harmonic_dictionary = pickle.load(fp)
+
+
+    def read_corpus_from_files(self, path):
+        self.corpus = []
+        for fname in glob.glob(path + '/*'):
+            try:
+                score = music21.converter.parse(fname)
+                print('--> ' + fname)
+                self.corpus.append(score)
+            except:
+                continue
+
+        if len(self.corpus) < 1:
+            print('Sorry, no files in {} could be parsed.'.format(path))
+            exit(1)
+
+        train, valid, test = self.allocate_corpus()
+
+        return train, valid, test
+
 
     def read_corpus(self,
             composer,
@@ -121,27 +147,16 @@ class Corpus(object):
         return duration, melodic, harmonic
 
 
-
-    def old_allocate_corpus(self):
-        corpus = self.corpus
-        train, test, valid = [], [], []
-        num_valid, num_test = len(corpus) // ValidFraction, len(corpus) // TestFraction
-        for file in corpus:
-            score = music21.corpus.parse(file)
-            if len(valid) < num_valid and random.random() < ValidFraction:
-                valid.append(score)
-            elif len(valid) < num_valid and random.random() < TestFraction:
-                test.append(score)
-            else:
-                train.append(score)
-        return train, valid, test
-
-
     def allocate_corpus(self):
+        random.shuffle(self.corpus)
         corpus = self.corpus
-        num_valid = int(math.floor(len(corpus) * ValidFraction))
-        num_test = int(math.floor(len(corpus) * TestFraction))
-        print(num_valid, num_test)
+        if len(corpus) < 3:
+            print('Error: the corpus is way too small!')
+            exit(1)
+        num_valid = max(1, int(math.floor(len(corpus) * ValidFraction)))
+        num_test = max(1, int(math.floor(len(corpus) * TestFraction)))
+        print('dev set size: {}\ntest set size: {}\n'.format(num_valid, num_test))
+
         test = corpus[: num_test]
         valid = corpus[num_test : num_test + num_valid]
         train = corpus[num_test + num_valid :]
@@ -165,7 +180,10 @@ class Corpus(object):
     def enc_measure_durations(self, measure):
         # if necessary, add encoding to dict, then return the encoding
         notes = measure.getElementsByClass(["Note", "Rest", "Chord"])
-        durations = [n.duration.quarterLength for n in notes]
+        durations = [n.duration.quarterLength
+                     if (type(n) == music21.note.Note) or (type(n) == music21.chord.Chord)
+                     else -n.duration.quarterLength
+                     for n in notes]
         return self.duration_dictionary.add_word(tuple(durations))
 
 

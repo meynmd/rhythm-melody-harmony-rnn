@@ -1,3 +1,9 @@
+"""
+training script for duration-melodic-harmonic music language model
+based on main.py from PyTorch word language model (Penn Treebank) example code
+https://github.com/pytorch/examples.git
+"""
+
 import argparse
 import time
 import math
@@ -52,6 +58,7 @@ parser.add_argument('--composer', type=str,  default=None,
 parser.add_argument('--corpus', type=str,  default=None,
                     help='directory containing files to train on')
 args = parser.parse_args()
+
 
 eval_batch_size = 10
 criterion = nn.CrossEntropyLoss()
@@ -170,7 +177,7 @@ def test(test_data, data_dict, test_model):
 
 ###############################################################################
 #                                                                             #
-# the script!!!!!                                                             #
+# the training script                                                         #
 #                                                                             #
 ###############################################################################
 
